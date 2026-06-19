@@ -11,5 +11,5 @@ spec:
     - name: wget
       image: busybox
       command: ['wget']
-      args: ['{{ include "harbor-vulnerabilities-exporter.fullname" . }}:{{ .Values.port }}']
+      args: ['{{ include "harbor-vulnerabilities-exporter.fullname" . }}:{{ .Values.env.EXPORTER_PORT }}']
   restartPolicy: Never

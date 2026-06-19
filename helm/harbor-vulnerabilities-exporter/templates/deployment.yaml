@@ -44,7 +44,7 @@ spec:
               protocol: TCP
           envFrom:
             - secretRef:
-                name: {{ include "harbor-vulnerabilities-exporter.fullname" . }}
+                name: {{ default (include "harbor-vulnerabilities-exporter.fullname" .) .Values.existingSecret.secretName }}
           {{- with .Values.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}
