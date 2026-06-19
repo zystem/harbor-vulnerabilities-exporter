@@ -2,14 +2,13 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
-  name: {{ include "harbor-vulnerabilities-exporter.name" . }}
+  name: {{ include "harbor-vulnerabilities-exporter.fullname" . }}
   labels:
-{{- include "harbor-vulnerabilities-exporter.labels" . | nindent 4 }}
+    {{- include "harbor-vulnerabilities-exporter.labels" . | nindent 4 }}
 spec:
-  jobLabel: harbor-vulnerabilities-exporter
   selector:
     matchLabels:
-{{- include "harbor-vulnerabilities-exporter.labels" . | nindent 6 }}
+      {{- include "harbor-vulnerabilities-exporter.selectorLabels" . | nindent 6 }}
   namespaceSelector:
     matchNames:
       - {{ .Release.Namespace }}

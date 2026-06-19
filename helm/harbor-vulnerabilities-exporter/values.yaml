@@ -5,17 +5,10 @@ image:
   repository: zystem/harbor-vulnerabilities-exporter
   pullPolicy: IfNotPresent
   tag: ""
-
 imagePullSecrets: []
+
 nameOverride: ""
 fullnameOverride: ""
-
-serviceAccount:
-  create: true
-  automount: true
-  annotations: {}
-  name: ""
-
 podAnnotations: {}
 podLabels: {}
 
@@ -33,11 +26,8 @@ securityContext:
     drop:
       - ALL
 
-serviceAccount:
-  create: true
-
 existingSecret:
-  secretName: ""
+  name: ""
 # OR
 env:
   EXPORTER_PORT: "8080"

@@ -25,7 +25,6 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "harbor-vulnerabilities-exporter.serviceAccountName" . }}
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -40,11 +39,11 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: metrics
-              containerPort: {{ .Values.env.EXPORTER_PORT }}
+              containerPort: {{ .Values.env.EXPORTER_PORT | int }}
               protocol: TCP
           envFrom:
             - secretRef:
-                name: {{ default (include "harbor-vulnerabilities-exporter.fullname" .) .Values.existingSecret.secretName }}
+                name: {{ default (include "harbor-vulnerabilities-exporter.fullname" .) .Values.existingSecret.name }}
           {{- with .Values.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}

@@ -49,14 +49,3 @@ Selector labels
 app.kubernetes.io/name: {{ include "harbor-vulnerabilities-exporter.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
-
-{{/*
-Create the name of the service account to use
-*/}}
-{{- define "harbor-vulnerabilities-exporter.serviceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- default (include "harbor-vulnerabilities-exporter.fullname" .) .Values.serviceAccount.name }}
-{{- else }}
-{{- default "default" .Values.serviceAccount.name }}
-{{- end }}
-{{- end }}
