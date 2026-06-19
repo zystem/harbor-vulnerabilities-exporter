@@ -1,0 +1,34 @@
+FROM nimlang/nim:2.2.4-alpine AS builder
+
+WORKDIR /src
+
+RUN apk add --no-cache \
+    gcc \
+    musl-dev \
+    openssl-dev \
+    pcre-dev \
+    git
+
+RUN nimble install -y mummy
+
+COPY harbor_vulnerabilities_exporter.nim .
+
+RUN nim c \
+    -d:release \
+    -d:ssl \
+    --threads:on \
+    --mm:orc \
+    --out:/out/harbor-vulnerabilities-exporter \
+    harbor_vulnerabilities_exporter.nim
+
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates
+
+COPY --from=builder /out/harbor-vulnerabilities-exporter /usr/local/bin/harbor-vulnerabilities-exporter
+
+USER 65534:65534
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/harbor-vulnerabilities-exporter"]

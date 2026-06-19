@@ -1,0 +1,71 @@
+# This will set the replicaset count more information can be found here: https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/
+replicaCount: 1
+
+image:
+  repository: zystem/harbor-vulnerabilities-exporter
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  capabilities:
+    drop:
+      - ALL
+
+serviceAccount:
+  create: true
+
+existingSecret:
+  secretName: ""
+# OR
+env:
+  EXPORTER_PORT: "8080"
+  HARBOR_API_URL: ""
+  HARBOR_USERNAME: ""
+  HARBOR_PASSWORD: ""
+  REFRESH_INTERVAL_SECONDS: "600"
+  INCLUDE_PROJECTS: ""
+  EXCLUDE_PROJECTS: ""
+  INCLUDE_REPOSITORIES: ""
+  EXCLUDE_REPOSITORIES: ""
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+podMonitor:
+  enabled: true
+  scrapeTimeout: "30s"
+  scrapeInterval: "600s"

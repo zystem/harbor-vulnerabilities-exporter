@@ -1,0 +1,9 @@
+apiVersion: v2
+name: harbor-vulnerabilities-exporter
+description: A Helm chart for showing vulnerabilities information in images stored
+  in Harbor
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+sources:
+- https://github.com/zystem/harbor-vulnerabilities-exporter.git
