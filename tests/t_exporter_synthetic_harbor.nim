@@ -22,3 +22,8 @@ suite "synthetic Harbor integration":
     check countOccurrences(text, "harbor_image_vulnerabilities{") == 7
     check "harbor_exporter_cache_ready 1" in text
     check "harbor_exporter_last_refresh_timestamp_seconds " in text
+    check "harbor_exporter_refresh_duration_seconds " in text
+    check "harbor_exporter_last_refresh_errors 0" in text
+    check "harbor_exporter_projects_total 2" in text
+    check "harbor_exporter_repositories_total 3" in text
+    check "harbor_exporter_vulnerabilities_total 7" in text

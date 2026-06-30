@@ -41,8 +41,35 @@ jobs:
       - name: Package chart
         run: |
           mkdir -p public
+          repo_url="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          curl -fsSL "$repo_url/index.yaml" -o public/index.yaml || true
+          if [ -s public/index.yaml ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          from urllib.parse import urlparse
+          from urllib.request import urlretrieve
+
+          index = Path("public/index.yaml").read_text()
+          for token in index.replace("\n", " ").split():
+              token = token.strip("'\"")
+              if not token.endswith(".tgz"):
+                  continue
+              name = Path(urlparse(token).path).name
+              target = Path("public") / name
+              if target.exists():
+                  continue
+              try:
+                  urlretrieve(token, target)
+              except Exception:
+                  pass
+          PY
+          fi
           helm package helm/harbor-vulnerabilities-exporter --destination public
-          helm repo index public --url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          if [ -s public/index.yaml ]; then
+            helm repo index public --url "$repo_url" --merge public/index.yaml
+          else
+            helm repo index public --url "$repo_url"
+          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

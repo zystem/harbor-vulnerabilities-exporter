@@ -37,6 +37,12 @@ let excludeRepositories =
     .mapIt(it.strip())
     .filterIt(it.len > 0)
 
+type RefreshStats = object
+  projects: int
+  repositories: int
+  vulnerabilities: int
+  errors: int
+
 proc logInfo(msg: string) =
   echo now().format("yyyy-MM-dd HH:mm:ss','fff") & " - INFO - " & msg
 
@@ -151,7 +157,7 @@ proc normalizeVulnerabilitiesHref*(apiBase, href: string): string =
 proc normalizeVulnerabilitiesHref(href: string): string =
   normalizeVulnerabilitiesHref(harborApiUrl, href)
 
-proc collectVulnerabilities(m: var MetricsBuilder, artifact: JsonVal, fullRepoName: string) =
+proc collectVulnerabilities(m: var MetricsBuilder, artifact: JsonVal, fullRepoName: string): int =
   try:
     let parts = fullRepoName.split("/", maxsplit = 1)
     if parts.len != 2:
@@ -187,10 +193,13 @@ proc collectVulnerabilities(m: var MetricsBuilder, artifact: JsonVal, fullRepoNa
     else:
       logInfo("Found vulnerabilities for repository " & fullRepoName & ": " & $count)
 
+    return count
+
   except CatchableError as e:
     logError("Error processing artifact " & fullRepoName & ": " & e.msg)
+    return 0
 
-proc processRepository(m: var MetricsBuilder, repo: JsonVal) =
+proc processRepository(m: var MetricsBuilder, repo: JsonVal, stats: var RefreshStats) =
   let fullName = repo.getStr("name")
   if fullName.len == 0:
     return
@@ -202,7 +211,10 @@ proc processRepository(m: var MetricsBuilder, repo: JsonVal) =
     let parts = fullName.split("/", maxsplit = 1)
     if parts.len != 2:
       logError("Repository name has unexpected format: " & fullName)
+      inc stats.errors
       return
+
+    inc stats.repositories
 
     let project = parts[0]
     let repository = parts[1].replace("/library", "")
@@ -235,12 +247,13 @@ proc processRepository(m: var MetricsBuilder, repo: JsonVal) =
       return
 
     logInfo("Found latest artifact for repository " & fullName & ":")
-    collectVulnerabilities(m, latest, fullName)
+    stats.vulnerabilities += collectVulnerabilities(m, latest, fullName)
 
   except CatchableError as e:
     logError("Error processing repository " & fullName & ": " & e.msg)
+    inc stats.errors
 
-proc processProject(m: var MetricsBuilder, project: JsonVal) =
+proc processProject(m: var MetricsBuilder, project: JsonVal, stats: var RefreshStats) =
   let projectName = project.getStr("name")
   if projectName.len == 0:
     return
@@ -248,6 +261,8 @@ proc processProject(m: var MetricsBuilder, project: JsonVal) =
   try:
     if not shouldProcessProject(projectName):
       return
+
+    inc stats.projects
 
     let url = harborApiUrl & "/projects/" & encodeUrl(projectName) &
               "/repositories?page=1&page_size=0"
@@ -267,15 +282,19 @@ proc processProject(m: var MetricsBuilder, project: JsonVal) =
     logMem("before project " & projectName)
 
     for repo in repos.items:
-      processRepository(m, repo)
+      processRepository(m, repo, stats)
 
     logMem("after project " & projectName)
 
   except CatchableError as e:
     logError("Error processing project " & projectName & ": " & e.msg)
+    inc stats.errors
 
 proc collectMetrics*(m: var MetricsBuilder) {.gcsafe.} =
   {.cast(gcsafe).}:
+    let refreshStarted = epochTime()
+    var stats: RefreshStats
+
     logInfo("Refreshing metrics file")
     logMem("refresh start")
 
@@ -284,6 +303,11 @@ proc collectMetrics*(m: var MetricsBuilder) {.gcsafe.} =
     m.gauge("harbor_exporter_cache_ready", 1)
     m.help("harbor_exporter_last_refresh_timestamp_seconds", "Last successful metrics refresh timestamp")
     m.gauge("harbor_exporter_last_refresh_timestamp_seconds", now().toTime().toUnix())
+    m.help("harbor_exporter_refresh_duration_seconds", "Duration of the last metrics refresh")
+    m.help("harbor_exporter_last_refresh_errors", "Errors seen during the last metrics refresh")
+    m.help("harbor_exporter_projects_total", "Projects processed during the last metrics refresh")
+    m.help("harbor_exporter_repositories_total", "Repositories processed during the last metrics refresh")
+    m.help("harbor_exporter_vulnerabilities_total", "Vulnerabilities emitted during the last metrics refresh")
 
     let body = httpGetContent(harborApiUrl & "/projects?page=1&page_size=0")
 
@@ -299,7 +323,13 @@ proc collectMetrics*(m: var MetricsBuilder) {.gcsafe.} =
     logMem("after projects list")
 
     for project in projects.items:
-      processProject(m, project)
+      processProject(m, project, stats)
+
+    m.gauge("harbor_exporter_refresh_duration_seconds", epochTime() - refreshStarted)
+    m.gauge("harbor_exporter_last_refresh_errors", stats.errors)
+    m.gauge("harbor_exporter_projects_total", stats.projects)
+    m.gauge("harbor_exporter_repositories_total", stats.repositories)
+    m.gauge("harbor_exporter_vulnerabilities_total", stats.vulnerabilities)
 
     logInfo("Metrics file refreshed successfully")
     logMem("refresh done")

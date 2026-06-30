@@ -27,11 +27,24 @@ Main metrics:
 harbor_image_vulnerabilities{id,package,version,fix_version,severity,project,repository} 1
 harbor_exporter_cache_ready 1
 harbor_exporter_last_refresh_timestamp_seconds ...
+harbor_exporter_refresh_duration_seconds ...
+harbor_exporter_last_refresh_errors ...
+harbor_exporter_projects_total ...
+harbor_exporter_repositories_total ...
+harbor_exporter_vulnerabilities_total ...
 ```
 
 `harbor_image_vulnerabilities` reports vulnerabilities found in the latest
 pushed artifact of each processed repository. Each vulnerability is emitted as
 one sample with labels from Harbor's vulnerability report.
+
+Example PromQL:
+
+```promql
+sum by (severity, project) (harbor_image_vulnerabilities)
+topk(10, sum by (package, severity) (harbor_image_vulnerabilities))
+time() - harbor_exporter_last_refresh_timestamp_seconds
+```
 
 ## Configuration
 
@@ -144,6 +157,17 @@ helm upgrade --install harbor-vulnerabilities-exporter \
   zystem/harbor-vulnerabilities-exporter \
   --namespace monitoring \
   --set existingSecret.name=harbor-vulnerabilities-exporter
+```
+
+If your Prometheus Operator selects `PodMonitor` objects by label, set
+`podMonitor.labels`:
+
+```sh
+helm upgrade --install harbor-vulnerabilities-exporter \
+  zystem/harbor-vulnerabilities-exporter \
+  --namespace monitoring \
+  --set existingSecret.name=harbor-vulnerabilities-exporter \
+  --set podMonitor.labels.release=prometheus
 ```
 
 ## CI and Releases

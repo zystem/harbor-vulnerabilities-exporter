@@ -64,5 +64,6 @@ affinity: {}
 
 podMonitor:
   enabled: true
+  labels: {}
   scrapeTimeout: "30s"
   scrapeInterval: "600s"

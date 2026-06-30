@@ -31,6 +31,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Set up Nim
         uses: jiro4989/setup-nim-action@v2
@@ -72,6 +74,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
@@ -83,7 +87,7 @@ jobs:
         run: |
           helm template harbor-vulnerabilities-exporter helm/harbor-vulnerabilities-exporter \
             --namespace monitoring \
-            --set env.HARBOR_API_URL=https://harbor.example
+            --set env.HARBOR_API_URL=https://harbor.example/api/v2.0
 
       - name: Package chart
         run: helm package helm/harbor-vulnerabilities-exporter --destination build/helm
@@ -97,6 +101,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -119,14 +125,15 @@ jobs:
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{version}},value=${{ github.event.inputs.release_tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '' }}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=sha,prefix=sha-
 
       - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
