@@ -22,7 +22,7 @@ RUN nim c \
     --out:/out/harbor-vulnerabilities-exporter \
     harbor_vulnerabilities_exporter.nim
 
-FROM alpine:3.20
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates curl
 
