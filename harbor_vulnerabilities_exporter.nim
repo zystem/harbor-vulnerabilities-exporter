@@ -1,17 +1,6 @@
-import mummy, mummy/routers
 import std/[httpclient, os, strutils, sequtils, uri, base64, times]
+import promlite
 import yyjson
-
-const MetricsHeader = """
-# HELP harbor_image_vulnerabilities Vulnerabilities found in the latest pushed image in every repository
-# TYPE harbor_image_vulnerabilities gauge
-"""
-
-const EmptyMetrics = MetricsHeader & """
-# HELP harbor_exporter_cache_ready Whether the metrics cache was successfully refreshed
-# TYPE harbor_exporter_cache_ready gauge
-harbor_exporter_cache_ready 0
-"""
 
 let harborApiUrl = getEnv("HARBOR_API_URL").strip(chars = {'/'})
 let harborUsername = getEnv("HARBOR_USERNAME")
@@ -19,10 +8,10 @@ let harborPassword = getEnv("HARBOR_PASSWORD")
 
 let exporterPort = parseInt(getEnv("EXPORTER_PORT", "9090"))
 let bindAddress = getEnv("BIND_ADDRESS", "0.0.0.0")
-let httpWorkerThreads = parseInt(getEnv("HTTP_WORKER_THREADS", "1"))
 
 let refreshIntervalSeconds = parseInt(getEnv("REFRESH_INTERVAL_SECONDS", "600"))
-let metricsFile = getEnv("METRICS_FILE", "/data/harbor-vulnerabilities-exporter.prom")
+let promliteDataDir = getEnv("PROM_LITE_DATA_DIR", "/data")
+let harborStaticJsonResponses = getEnv("HARBOR_STATIC_JSON_RESPONSES", "") in ["1", "true", "yes"]
 
 let includeProjects =
   getEnv("INCLUDE_PROJECTS", "")
@@ -48,10 +37,6 @@ let excludeRepositories =
     .mapIt(it.strip())
     .filterIt(it.len > 0)
 
-if harborApiUrl.len == 0:
-  stderr.writeLine("HARBOR_API_URL env variable is required.")
-  quit(2)
-
 proc logInfo(msg: string) =
   echo now().format("yyyy-MM-dd HH:mm:ss','fff") & " - INFO - " & msg
 
@@ -72,7 +57,7 @@ proc logMem(stage: string) =
   if rss >= 0:
     logInfo(stage & " RSS=" & $rss & " KiB")
 
-proc matchPattern(value, pattern: string): bool =
+proc matchPattern*(value, pattern: string): bool =
   if pattern == "*":
     return true
 
@@ -92,7 +77,7 @@ proc matchPattern(value, pattern: string): bool =
   let parts = pattern.split('*')
   return value.startsWith(parts[0]) and value.endsWith(parts[^1])
 
-proc matchesAny(value: string, patterns: seq[string]): bool =
+proc matchesAny*(value: string, patterns: seq[string]): bool =
   for pattern in patterns:
     if matchPattern(value, pattern):
       return true
@@ -125,48 +110,48 @@ proc authHeaders(): httpclient.HttpHeaders =
   if harborUsername.len > 0 and harborPassword.len > 0:
     result["Authorization"] = "Basic " & encode(harborUsername & ":" & harborPassword)
 
+proc jsonResponseUrl(url: string): string =
+  let queryPos = url.find('?')
+  if queryPos >= 0:
+    url[0 ..< queryPos] & ".json" & url[queryPos .. ^1]
+  else:
+    url & ".json"
+
 proc httpGetContent(url: string): string =
   var client = httpclient.newHttpClient(headers = authHeaders())
   defer:
     client.close()
 
-  return client.getContent(url)
+  try:
+    return client.getContent(url)
+  except CatchableError:
+    if harborStaticJsonResponses:
+      return client.getContent(jsonResponseUrl(url))
+    raise
 
-proc promEscape(s: string): string =
-  result = s
-  result = result.replace("\\", "\\\\")
-  result = result.replace("\n", "\\n")
-  result = result.replace("\"", "\\\"")
+proc writeMetricLine*(m: var MetricsBuilder, v: JsonVal, project, repo: string) =
+  m.gauge("harbor_image_vulnerabilities", 1, labels = {
+    "id": v.getStr("id"),
+    "package": v.getStr("package"),
+    "version": v.getStr("version"),
+    "fix_version": v.getStr("fix_version"),
+    "severity": v.getStr("severity"),
+    "project": project,
+    "repository": repo
+  })
 
-proc writeMetricLine(f: File, v: JsonVal, project, repo: string) =
-  f.write("harbor_image_vulnerabilities{")
-  f.write("id=\"" & promEscape(v.getStr("id")) & "\",")
-  f.write("package=\"" & promEscape(v.getStr("package")) & "\",")
-  f.write("version=\"" & promEscape(v.getStr("version")) & "\",")
-  f.write("fix_version=\"" & promEscape(v.getStr("fix_version")) & "\",")
-  f.write("severity=\"" & promEscape(v.getStr("severity")) & "\",")
-  f.write("project=\"" & promEscape(project) & "\",")
-  f.write("repository=\"" & promEscape(repo) & "\"")
-  f.write("} 1\n")
+proc normalizeVulnerabilitiesHref*(apiBase, href: string): string =
+  if href.startsWith("http://") or href.startsWith("https://"):
+    return href
 
-proc normalizeVulnerabilitiesHref(href: string): string =
   var h = href
   h = h.replace("/api/v2.0", "")
-  return harborApiUrl & h
+  return apiBase.strip(chars = {'/'}) & h
 
-proc writeMetricsHeader(f: File) =
-  f.write(MetricsHeader.strip())
-  f.write('\n')
-  f.write("# HELP harbor_exporter_cache_ready Whether the metrics cache was successfully refreshed\n")
-  f.write("# TYPE harbor_exporter_cache_ready gauge\n")
-  f.write("harbor_exporter_cache_ready 1\n")
-  f.write("# HELP harbor_exporter_last_refresh_timestamp_seconds Last successful metrics refresh timestamp\n")
-  f.write("# TYPE harbor_exporter_last_refresh_timestamp_seconds gauge\n")
-  f.write("harbor_exporter_last_refresh_timestamp_seconds ")
-  f.write($now().toTime().toUnix())
-  f.write('\n')
+proc normalizeVulnerabilitiesHref(href: string): string =
+  normalizeVulnerabilitiesHref(harborApiUrl, href)
 
-proc collectVulnerabilitiesToFile(f: File, artifact: JsonVal, fullRepoName: string) =
+proc collectVulnerabilities(m: var MetricsBuilder, artifact: JsonVal, fullRepoName: string) =
   try:
     let parts = fullRepoName.split("/", maxsplit = 1)
     if parts.len != 2:
@@ -194,7 +179,7 @@ proc collectVulnerabilitiesToFile(f: File, artifact: JsonVal, fullRepoName: stri
         continue
 
       for v in vulns.items:
-        writeMetricLine(f, v, project, repo)
+        writeMetricLine(m, v, project, repo)
         inc count
 
     if count == 0:
@@ -205,7 +190,7 @@ proc collectVulnerabilitiesToFile(f: File, artifact: JsonVal, fullRepoName: stri
   except CatchableError as e:
     logError("Error processing artifact " & fullRepoName & ": " & e.msg)
 
-proc processRepositoryToFile(f: File, repo: JsonVal) =
+proc processRepository(m: var MetricsBuilder, repo: JsonVal) =
   let fullName = repo.getStr("name")
   if fullName.len == 0:
     return
@@ -250,12 +235,12 @@ proc processRepositoryToFile(f: File, repo: JsonVal) =
       return
 
     logInfo("Found latest artifact for repository " & fullName & ":")
-    collectVulnerabilitiesToFile(f, latest, fullName)
+    collectVulnerabilities(m, latest, fullName)
 
   except CatchableError as e:
     logError("Error processing repository " & fullName & ": " & e.msg)
 
-proc processProjectToFile(f: File, project: JsonVal) =
+proc processProject(m: var MetricsBuilder, project: JsonVal) =
   let projectName = project.getStr("name")
   if projectName.len == 0:
     return
@@ -282,35 +267,23 @@ proc processProjectToFile(f: File, project: JsonVal) =
     logMem("before project " & projectName)
 
     for repo in repos.items:
-      processRepositoryToFile(f, repo)
+      processRepository(m, repo)
 
-    f.flushFile()
     logMem("after project " & projectName)
 
   except CatchableError as e:
     logError("Error processing project " & projectName & ": " & e.msg)
 
-proc replaceFileAtomic(src, dst: string) =
-  if fileExists(dst):
-    removeFile(dst)
-  moveFile(src, dst)
+proc collectMetrics*(m: var MetricsBuilder) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    logInfo("Refreshing metrics file")
+    logMem("refresh start")
 
-proc refreshMetricsFile() =
-  let dir = parentDir(metricsFile)
-  if dir.len > 0:
-    createDir(dir)
-
-  let tmpFile = metricsFile & ".tmp." & $getCurrentProcessId()
-
-  logInfo("Refreshing metrics file")
-  logMem("refresh start")
-
-  var f: File
-  if not open(f, tmpFile, fmWrite):
-    raise newException(IOError, "Cannot open metrics temp file: " & tmpFile)
-
-  try:
-    writeMetricsHeader(f)
+    m.help("harbor_image_vulnerabilities", "Vulnerabilities found in the latest pushed image in every repository")
+    m.help("harbor_exporter_cache_ready", "Whether the metrics cache was successfully refreshed")
+    m.gauge("harbor_exporter_cache_ready", 1)
+    m.help("harbor_exporter_last_refresh_timestamp_seconds", "Last successful metrics refresh timestamp")
+    m.gauge("harbor_exporter_last_refresh_timestamp_seconds", now().toTime().toUnix())
 
     let body = httpGetContent(harborApiUrl & "/projects?page=1&page_size=0")
 
@@ -326,65 +299,30 @@ proc refreshMetricsFile() =
     logMem("after projects list")
 
     for project in projects.items:
-      processProjectToFile(f, project)
+      processProject(m, project)
 
-    f.flushFile()
+    logInfo("Metrics file refreshed successfully")
+    logMem("refresh done")
 
-  finally:
-    f.close()
+proc main() =
+  if harborApiUrl.len == 0:
+    stderr.writeLine("HARBOR_API_URL env variable is required.")
+    quit(2)
 
-  replaceFileAtomic(tmpFile, metricsFile)
+  logInfo(
+    "Starting HTTP server on " & bindAddress & ":" & $exporterPort
+  )
 
-  logInfo("Metrics file refreshed successfully: " & metricsFile)
-  logMem("refresh done")
+  let exporter = newExporter(
+    address = bindAddress,
+    port = exporterPort,
+    refreshIntervalSeconds = refreshIntervalSeconds,
+    collector = collectMetrics,
+    dataDir = promliteDataDir,
+    metricsFileName = "metrics"
+  )
 
-proc refreshLoop() {.thread.} =
-  while true:
-    {.cast(gcsafe).}:
-      try:
-        refreshMetricsFile()
-      except CatchableError as e:
-        logError("Metrics cache refresh failed: " & e.msg)
+  exporter.run()
 
-    sleep(refreshIntervalSeconds * 1000)
-
-proc cachedMetricsFromFile(): string =
-  if fileExists(metricsFile):
-    return readFile(metricsFile)
-
-  return EmptyMetrics
-
-proc metricsHandler(request: Request) {.gcsafe.} =
-  var headers: mummy.HttpHeaders
-  headers["Content-Type"] = "text/plain; version=0.0.4"
-
-  {.cast(gcsafe).}:
-    request.respond(200, headers, cachedMetricsFromFile())
-
-proc healthHandler(request: Request) {.gcsafe.} =
-  var headers: mummy.HttpHeaders
-  headers["Content-Type"] = "text/plain"
-  request.respond(200, headers, "ok\n")
-
-proc notFoundHandler(request: Request) {.gcsafe.} =
-  var headers: mummy.HttpHeaders
-  headers["Content-Type"] = "text/plain"
-  request.respond(404, headers, "not found\n")
-
-var router: Router
-router.get("/metrics", metricsHandler)
-router.get("/health", healthHandler)
-router.get("/-/health", healthHandler)
-router.get("/*", notFoundHandler)
-
-var thread: Thread[void]
-createThread(thread, refreshLoop)
-
-let server = newServer(router, workerThreads = httpWorkerThreads)
-
-logInfo(
-  "Starting HTTP server on " & bindAddress & ":" & $exporterPort &
-  " with " & $httpWorkerThreads & " worker thread(s)"
-)
-
-server.serve(Port(exporterPort), bindAddress)
+when isMainModule:
+  main()

@@ -6,10 +6,11 @@ RUN apk add --no-cache \
     gcc \
     musl-dev \
     openssl-dev \
-    pcre-dev \
     git
 
-RUN nimble install -y mummy yyjson
+RUN nimble install -y \
+    https://github.com/zystem/nim-yyjson \
+    https://github.com/zystem/nim-promlite
 
 COPY harbor_vulnerabilities_exporter.nim .
 

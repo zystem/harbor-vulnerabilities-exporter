@@ -2,7 +2,7 @@
 replicaCount: 1
 
 image:
-  repository: zystem/harbor-vulnerabilities-exporter
+  repository: ghcr.io/zystem/harbor-vulnerabilities-exporter
   pullPolicy: IfNotPresent
   tag: ""
 imagePullSecrets: []
@@ -35,6 +35,7 @@ env:
   HARBOR_USERNAME: ""
   HARBOR_PASSWORD: ""
   REFRESH_INTERVAL_SECONDS: "600"
+  PROM_LITE_DATA_DIR: "/data"
   INCLUDE_PROJECTS: ""
   EXCLUDE_PROJECTS: ""
   INCLUDE_REPOSITORIES: ""
@@ -50,11 +51,11 @@ resources:
 
 livenessProbe:
   httpGet:
-    path: /health
+    path: /healthz
     port: metrics
 readinessProbe:
   httpGet:
-    path: /health
+    path: /healthz
     port: metrics
 
 nodeSelector: {}
