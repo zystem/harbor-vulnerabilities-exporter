@@ -32,6 +32,9 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
       - name: Lint chart
         run: helm lint helm/harbor-vulnerabilities-exporter
 

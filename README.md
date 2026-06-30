@@ -7,6 +7,10 @@ The Helm chart is published to GitHub Pages from `.github/workflows/helm-pages.y
 Enable GitHub Pages for this repository with **Source: GitHub Actions**, then push to
 `main` or run the `Publish Helm chart` workflow manually.
 
+If the `Deploy to GitHub Pages` step fails with `HttpError: Not Found`, open
+`Settings -> Pages` and set **Build and deployment -> Source** to
+**GitHub Actions**.
+
 ```sh
 helm repo add zystem https://zystem.github.io/harbor-vulnerabilities-exporter
 helm repo update
