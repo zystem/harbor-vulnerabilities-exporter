@@ -1,16 +1,28 @@
 import mummy, mummy/routers
-import std/[httpclient, json, os, strutils, sequtils, uri, base64, times, tables, locks]
+import std/[httpclient, os, strutils, sequtils, uri, base64, times]
+import yyjson
 
 const MetricsHeader = """
 # HELP harbor_image_vulnerabilities Vulnerabilities found in the latest pushed image in every repository
 # TYPE harbor_image_vulnerabilities gauge
 """
 
+const EmptyMetrics = MetricsHeader & """
+# HELP harbor_exporter_cache_ready Whether the metrics cache was successfully refreshed
+# TYPE harbor_exporter_cache_ready gauge
+harbor_exporter_cache_ready 0
+"""
+
 let harborApiUrl = getEnv("HARBOR_API_URL").strip(chars = {'/'})
 let harborUsername = getEnv("HARBOR_USERNAME")
 let harborPassword = getEnv("HARBOR_PASSWORD")
-let exporterPort = parseInt(getEnv("EXPORTER_PORT", "8080"))
+
+let exporterPort = parseInt(getEnv("EXPORTER_PORT", "9090"))
+let bindAddress = getEnv("BIND_ADDRESS", "0.0.0.0")
+let httpWorkerThreads = parseInt(getEnv("HTTP_WORKER_THREADS", "1"))
+
 let refreshIntervalSeconds = parseInt(getEnv("REFRESH_INTERVAL_SECONDS", "600"))
+let metricsFile = getEnv("METRICS_FILE", "/data/harbor-vulnerabilities-exporter.prom")
 
 let includeProjects =
   getEnv("INCLUDE_PROJECTS", "")
@@ -36,11 +48,6 @@ let excludeRepositories =
     .mapIt(it.strip())
     .filterIt(it.len > 0)
 
-var cacheLock: Lock
-var metricsCache = MetricsHeader & "\nharbor_exporter_cache_ready 0\n"
-
-initLock(cacheLock)
-
 if harborApiUrl.len == 0:
   stderr.writeLine("HARBOR_API_URL env variable is required.")
   quit(2)
@@ -50,6 +57,20 @@ proc logInfo(msg: string) =
 
 proc logError(msg: string) =
   stderr.writeLine(now().format("yyyy-MM-dd HH:mm:ss','fff") & " - ERROR - " & msg)
+
+proc currentRSSKb(): int =
+  try:
+    for line in lines("/proc/self/status"):
+      if line.startsWith("VmRSS:"):
+        return parseInt(line.splitWhitespace()[1])
+  except CatchableError:
+    discard
+  return -1
+
+proc logMem(stage: string) =
+  let rss = currentRSSKb()
+  if rss >= 0:
+    logInfo(stage & " RSS=" & $rss & " KiB")
 
 proc matchPattern(value, pattern: string): bool =
   if pattern == "*":
@@ -69,8 +90,7 @@ proc matchPattern(value, pattern: string): bool =
     return value.startsWith(pattern[0 .. ^2])
 
   let parts = pattern.split('*')
-  return value.startsWith(parts[0]) and
-         value.endsWith(parts[^1])
+  return value.startsWith(parts[0]) and value.endsWith(parts[^1])
 
 proc matchesAny(value: string, patterns: seq[string]): bool =
   for pattern in patterns:
@@ -105,84 +125,99 @@ proc authHeaders(): httpclient.HttpHeaders =
   if harborUsername.len > 0 and harborPassword.len > 0:
     result["Authorization"] = "Basic " & encode(harborUsername & ":" & harborPassword)
 
+proc httpGetContent(url: string): string =
+  var client = httpclient.newHttpClient(headers = authHeaders())
+  defer:
+    client.close()
+
+  return client.getContent(url)
+
 proc promEscape(s: string): string =
   result = s
   result = result.replace("\\", "\\\\")
   result = result.replace("\n", "\\n")
   result = result.replace("\"", "\\\"")
 
-proc metricLine(v: JsonNode, project, repo: string): string =
-  let labels = {
-    "id": v{"id"}.getStr(""),
-    "package": v{"package"}.getStr(""),
-    "version": v{"version"}.getStr(""),
-    "fix_version": v{"fix_version"}.getStr(""),
-    "severity": v{"severity"}.getStr(""),
-    "project": project,
-    "repository": repo
-  }.toTable
+proc writeMetricLine(f: File, v: JsonVal, project, repo: string) =
+  f.write("harbor_image_vulnerabilities{")
+  f.write("id=\"" & promEscape(v.getStr("id")) & "\",")
+  f.write("package=\"" & promEscape(v.getStr("package")) & "\",")
+  f.write("version=\"" & promEscape(v.getStr("version")) & "\",")
+  f.write("fix_version=\"" & promEscape(v.getStr("fix_version")) & "\",")
+  f.write("severity=\"" & promEscape(v.getStr("severity")) & "\",")
+  f.write("project=\"" & promEscape(project) & "\",")
+  f.write("repository=\"" & promEscape(repo) & "\"")
+  f.write("} 1\n")
 
-  var parts: seq[string] = @[]
-  for k, val in labels:
-    parts.add(k & "=\"" & promEscape(val) & "\"")
+proc normalizeVulnerabilitiesHref(href: string): string =
+  var h = href
+  h = h.replace("/api/v2.0", "")
+  return harborApiUrl & h
 
-  return "harbor_image_vulnerabilities{" & parts.join(",") & "} 1"
+proc writeMetricsHeader(f: File) =
+  f.write(MetricsHeader.strip())
+  f.write('\n')
+  f.write("# HELP harbor_exporter_cache_ready Whether the metrics cache was successfully refreshed\n")
+  f.write("# TYPE harbor_exporter_cache_ready gauge\n")
+  f.write("harbor_exporter_cache_ready 1\n")
+  f.write("# HELP harbor_exporter_last_refresh_timestamp_seconds Last successful metrics refresh timestamp\n")
+  f.write("# TYPE harbor_exporter_last_refresh_timestamp_seconds gauge\n")
+  f.write("harbor_exporter_last_refresh_timestamp_seconds ")
+  f.write($now().toTime().toUnix())
+  f.write('\n')
 
-proc httpGetJson(url: string): JsonNode =
-  var client = httpclient.newHttpClient(headers = authHeaders())
-  defer:
-    client.close()
-
-  return parseJson(client.getContent(url))
-
-proc collectArtifact(artifact: JsonNode, fullRepoName: string): string =
+proc collectVulnerabilitiesToFile(f: File, artifact: JsonVal, fullRepoName: string) =
   try:
     let parts = fullRepoName.split("/", maxsplit = 1)
     if parts.len != 2:
-      return ""
+      return
 
     let project = parts[0]
     let repo = parts[1]
 
-    var href = artifact{"addition_links"}{"vulnerabilities"}{"href"}.getStr("")
+    let href = artifact["addition_links"]["vulnerabilities"]["href"].str("")
     if href.len == 0:
-      return ""
+      logInfo("No vulnerabilities addition link for repository " & fullRepoName)
+      return
 
-    href = href.replace("/api/v2.0", "")
-    let data = httpGetJson(harborApiUrl & href)
+    let url = normalizeVulnerabilitiesHref(href)
+    let body = httpGetContent(url)
 
-    if data.len == 0:
-      return ""
+    var doc = readJson(body)
+    defer:
+      doc.close()
 
-    let firstKey = data.keys().toSeq()[0]
-    let vulnerabilities = data[firstKey]{"vulnerabilities"}
+    var count = 0
+    for _, report in doc.root().pairs:
+      let vulns = report["vulnerabilities"]
+      if not vulns.isArray:
+        continue
 
-    if vulnerabilities.kind != JArray or vulnerabilities.len == 0:
+      for v in vulns.items:
+        writeMetricLine(f, v, project, repo)
+        inc count
+
+    if count == 0:
       logInfo("No vulnerabilities found for repository " & fullRepoName)
-      return ""
-
-    logInfo("Found vulnerabilities for repository " & fullRepoName)
-
-    var lines: seq[string] = @[]
-    for v in vulnerabilities:
-      lines.add(metricLine(v, project, repo))
-
-    return lines.join("\n")
+    else:
+      logInfo("Found vulnerabilities for repository " & fullRepoName & ": " & $count)
 
   except CatchableError as e:
     logError("Error processing artifact " & fullRepoName & ": " & e.msg)
-    return ""
 
-proc processRepo(repo: JsonNode): string =
-  let fullName = repo{"name"}.getStr("")
+proc processRepositoryToFile(f: File, repo: JsonVal) =
+  let fullName = repo.getStr("name")
+  if fullName.len == 0:
+    return
 
   try:
     if not shouldProcessRepository(fullName):
-      return ""
+      return
 
     let parts = fullName.split("/", maxsplit = 1)
     if parts.len != 2:
-      return ""
+      logError("Repository name has unexpected format: " & fullName)
+      return
 
     let project = parts[0]
     let repository = parts[1].replace("/library", "")
@@ -190,117 +225,141 @@ proc processRepo(repo: JsonNode): string =
     let encodedRepo = encodeUrl(encodeUrl(repository))
     let url = harborApiUrl & "/projects/" & encodeUrl(project) &
               "/repositories/" & encodedRepo &
-              "/artifacts?page=1&page_size=0"
+              "/artifacts?page=1&page_size=1&sort=-push_time"
 
-    let artifacts = httpGetJson(url)
+    let body = httpGetContent(url)
 
-    if artifacts.kind != JArray or artifacts.len == 0:
+    var doc = readJson(body)
+    defer:
+      doc.close()
+
+    let artifacts = doc.root()
+    if not artifacts.isArray or artifacts.len == 0:
       logInfo("No artifacts found for repository " & fullName)
-      return ""
+      return
 
-    var latest = artifacts[0]
-    for artifact in artifacts:
-      if artifact{"push_time"}.getStr("") > latest{"push_time"}.getStr(""):
-        latest = artifact
+    let latest = block:
+      var item: JsonVal
+      for artifact in artifacts.items:
+        item = artifact
+        break
+      item
+
+    if latest.isNil:
+      logInfo("No artifacts found for repository " & fullName)
+      return
 
     logInfo("Found latest artifact for repository " & fullName & ":")
-    return collectArtifact(latest, fullName)
+    collectVulnerabilitiesToFile(f, latest, fullName)
 
   except CatchableError as e:
     logError("Error processing repository " & fullName & ": " & e.msg)
-    return ""
 
-proc processProject(project: JsonNode): string =
+proc processProjectToFile(f: File, project: JsonVal) =
+  let projectName = project.getStr("name")
+  if projectName.len == 0:
+    return
+
   try:
-    let projectName = project{"name"}.getStr("")
-
     if not shouldProcessProject(projectName):
-      return ""
+      return
 
     let url = harborApiUrl & "/projects/" & encodeUrl(projectName) &
               "/repositories?page=1&page_size=0"
 
-    let repos = httpGetJson(url)
-    if repos.kind != JArray:
-      return ""
+    let body = httpGetContent(url)
 
-    var repoMetrics: seq[string] = @[]
+    var doc = readJson(body)
+    defer:
+      doc.close()
 
-    for repo in repos:
-      let m = processRepo(repo)
-      if m.len > 0:
-        repoMetrics.add(m)
+    let repos = doc.root()
+    if not repos.isArray:
+      logError("Repositories response is not an array for project " & projectName)
+      return
 
-    return repoMetrics.join("\n")
+    logInfo("Processing project " & projectName & " repositories=" & $repos.len)
+    logMem("before project " & projectName)
 
-  except CatchableError as e:
-    logError("Error processing project: " & e.msg)
-    return ""
+    for repo in repos.items:
+      processRepositoryToFile(f, repo)
 
-proc collectMetrics(): string =
-  let projects = httpGetJson(harborApiUrl & "/projects?page=1&page_size=0")
-  if projects.kind != JArray:
-    return MetricsHeader & "\nharbor_exporter_cache_ready 0\n"
-
-  var projectMetrics: seq[string] = @[]
-
-  for project in projects:
-    let m = processProject(project)
-    if m.len > 0:
-      projectMetrics.add(m)
-
-  var output: seq[string] = @[
-    MetricsHeader.strip(),
-    "# HELP harbor_exporter_cache_ready Whether the metrics cache was successfully refreshed",
-    "# TYPE harbor_exporter_cache_ready gauge",
-    "harbor_exporter_cache_ready 1",
-    "# HELP harbor_exporter_last_refresh_timestamp_seconds Last successful metrics refresh timestamp",
-    "# TYPE harbor_exporter_last_refresh_timestamp_seconds gauge",
-    "harbor_exporter_last_refresh_timestamp_seconds " & $now().toTime().toUnix()
-  ]
-
-  output.add(projectMetrics)
-  return output.join("\n") & "\n"
-
-proc refreshMetrics() =
-  logInfo("Refreshing metrics cache")
-
-  try:
-    let body = collectMetrics()
-
-    acquire(cacheLock)
-    try:
-      metricsCache = body
-    finally:
-      release(cacheLock)
-
-    logInfo("Metrics cache refreshed successfully")
+    f.flushFile()
+    logMem("after project " & projectName)
 
   except CatchableError as e:
-    logError("Metrics cache refresh failed: " & e.msg)
+    logError("Error processing project " & projectName & ": " & e.msg)
 
-proc cachedMetrics(): string =
-  acquire(cacheLock)
+proc replaceFileAtomic(src, dst: string) =
+  if fileExists(dst):
+    removeFile(dst)
+  moveFile(src, dst)
+
+proc refreshMetricsFile() =
+  let dir = parentDir(metricsFile)
+  if dir.len > 0:
+    createDir(dir)
+
+  let tmpFile = metricsFile & ".tmp." & $getCurrentProcessId()
+
+  logInfo("Refreshing metrics file")
+  logMem("refresh start")
+
+  var f: File
+  if not open(f, tmpFile, fmWrite):
+    raise newException(IOError, "Cannot open metrics temp file: " & tmpFile)
+
   try:
-    return metricsCache
+    writeMetricsHeader(f)
+
+    let body = httpGetContent(harborApiUrl & "/projects?page=1&page_size=0")
+
+    var doc = readJson(body)
+    defer:
+      doc.close()
+
+    let projects = doc.root()
+    if not projects.isArray:
+      raise newException(ValueError, "Projects response is not an array")
+
+    logInfo("Projects count=" & $projects.len)
+    logMem("after projects list")
+
+    for project in projects.items:
+      processProjectToFile(f, project)
+
+    f.flushFile()
+
   finally:
-    release(cacheLock)
+    f.close()
+
+  replaceFileAtomic(tmpFile, metricsFile)
+
+  logInfo("Metrics file refreshed successfully: " & metricsFile)
+  logMem("refresh done")
 
 proc refreshLoop() {.thread.} =
-  {.cast(gcsafe).}:
-    refreshMetrics()
-
   while true:
-    sleep(refreshIntervalSeconds * 1000)
     {.cast(gcsafe).}:
-      refreshMetrics()
+      try:
+        refreshMetricsFile()
+      except CatchableError as e:
+        logError("Metrics cache refresh failed: " & e.msg)
+
+    sleep(refreshIntervalSeconds * 1000)
+
+proc cachedMetricsFromFile(): string =
+  if fileExists(metricsFile):
+    return readFile(metricsFile)
+
+  return EmptyMetrics
 
 proc metricsHandler(request: Request) {.gcsafe.} =
   var headers: mummy.HttpHeaders
   headers["Content-Type"] = "text/plain; version=0.0.4"
 
   {.cast(gcsafe).}:
-    request.respond(200, headers, cachedMetrics())
+    request.respond(200, headers, cachedMetricsFromFile())
 
 proc healthHandler(request: Request) {.gcsafe.} =
   var headers: mummy.HttpHeaders
@@ -321,6 +380,11 @@ router.get("/*", notFoundHandler)
 var thread: Thread[void]
 createThread(thread, refreshLoop)
 
-let server = newServer(router)
-logInfo("Starting HTTP server on 0.0.0.0:" & $exporterPort)
-server.serve(Port(exporterPort))
+let server = newServer(router, workerThreads = httpWorkerThreads)
+
+logInfo(
+  "Starting HTTP server on " & bindAddress & ":" & $exporterPort &
+  " with " & $httpWorkerThreads & " worker thread(s)"
+)
+
+server.serve(Port(exporterPort), bindAddress)

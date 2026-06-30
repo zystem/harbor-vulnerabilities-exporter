@@ -9,7 +9,7 @@ RUN apk add --no-cache \
     pcre-dev \
     git
 
-RUN nimble install -y mummy
+RUN nimble install -y mummy yyjson
 
 COPY harbor_vulnerabilities_exporter.nim .
 
@@ -23,12 +23,14 @@ RUN nim c \
 
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates curl
+
+RUN mkdir -p /data && chown 65534:65534 /data
 
 COPY --from=builder /out/harbor-vulnerabilities-exporter /usr/local/bin/harbor-vulnerabilities-exporter
 
 USER 65534:65534
 
-EXPOSE 8080
+EXPOSE 9090
 
 ENTRYPOINT ["/usr/local/bin/harbor-vulnerabilities-exporter"]

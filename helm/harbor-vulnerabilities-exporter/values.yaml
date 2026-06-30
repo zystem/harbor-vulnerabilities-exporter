@@ -30,7 +30,7 @@ existingSecret:
   name: ""
 # OR
 env:
-  EXPORTER_PORT: "8080"
+  EXPORTER_PORT: "9090"
   HARBOR_API_URL: ""
   HARBOR_USERNAME: ""
   HARBOR_PASSWORD: ""
@@ -51,11 +51,11 @@ resources:
 livenessProbe:
   httpGet:
     path: /health
-    port: http
+    port: metrics
 readinessProbe:
   httpGet:
     path: /health
-    port: http
+    port: metrics
 
 nodeSelector: {}
 tolerations: []
