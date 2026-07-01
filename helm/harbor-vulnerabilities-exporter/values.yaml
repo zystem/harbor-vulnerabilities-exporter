@@ -66,4 +66,4 @@ podMonitor:
   enabled: true
   labels: {}
   scrapeTimeout: "30s"
-  scrapeInterval: "600s"
+  scrapeInterval: "180s"
