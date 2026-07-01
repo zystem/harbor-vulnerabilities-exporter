@@ -22,6 +22,7 @@ permissions:
 env:
   NIM_VERSION: "2.2.4"
   IMAGE_NAME: ghcr.io/${{ github.repository }}
+  HELM_CHART_REPOSITORY: oci://ghcr.io/${{ github.repository_owner }}/charts
 
 jobs:
   test-build:
@@ -91,6 +92,19 @@ jobs:
 
       - name: Package chart
         run: helm package helm/harbor-vulnerabilities-exporter --destination build/helm
+
+      - name: Log in to GHCR for Helm
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
+            --username "${{ github.actor }}" \
+            --password-stdin
+
+      - name: Publish chart to GHCR OCI
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')
+        run: |
+          chart="$(ls build/helm/*.tgz)"
+          helm push "$chart" "$HELM_CHART_REPOSITORY"
 
   docker:
     name: Docker
