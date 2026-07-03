@@ -69,8 +69,9 @@ Optional:
 | `INCLUDE_REPOSITORIES` | empty | Comma-separated repository patterns to include |
 | `EXCLUDE_REPOSITORIES` | empty | Comma-separated repository patterns to exclude |
 
-Patterns use POSIX glob syntax through `posixglob`. Common examples include
-`prod-*`, `*/frontend`, `*sandbox*`, `repo-?`, and `project-[ab]`.
+Pattern lists are parsed with `posixglob.parseGlobPatterns()` and each item
+uses POSIX glob syntax. Common examples include `prod-*`, `*/frontend`,
+`*sandbox*`, `repo-?`, and `project-[ab]`.
 Repository names use Harbor's full repository name, for example
 `project-a/app`.
 

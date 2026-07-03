@@ -1,4 +1,4 @@
-import std/[httpclient, os, strutils, sequtils, uri, base64, times]
+import std/[httpclient, os, strutils, uri, base64, times]
 import posixglob
 import promlite
 import yyjson
@@ -15,28 +15,16 @@ let promliteDataDir = getEnv("PROM_LITE_DATA_DIR", "/data")
 let harborStaticJsonResponses = getEnv("HARBOR_STATIC_JSON_RESPONSES", "") in ["1", "true", "yes"]
 
 let includeProjects =
-  getEnv("INCLUDE_PROJECTS", "")
-    .split(',')
-    .mapIt(it.strip())
-    .filterIt(it.len > 0)
+  parseGlobPatterns(getEnv("INCLUDE_PROJECTS", ""))
 
 let excludeProjects =
-  getEnv("EXCLUDE_PROJECTS", "")
-    .split(',')
-    .mapIt(it.strip())
-    .filterIt(it.len > 0)
+  parseGlobPatterns(getEnv("EXCLUDE_PROJECTS", ""))
 
 let includeRepositories =
-  getEnv("INCLUDE_REPOSITORIES", "")
-    .split(',')
-    .mapIt(it.strip())
-    .filterIt(it.len > 0)
+  parseGlobPatterns(getEnv("INCLUDE_REPOSITORIES", ""))
 
 let excludeRepositories =
-  getEnv("EXCLUDE_REPOSITORIES", "")
-    .split(',')
-    .mapIt(it.strip())
-    .filterIt(it.len > 0)
+  parseGlobPatterns(getEnv("EXCLUDE_REPOSITORIES", ""))
 
 type RefreshStats = object
   projects: int
@@ -68,10 +56,7 @@ proc matchPattern*(value, pattern: string): bool =
   globMatch(pattern, value)
 
 proc matchesAny*(value: string, patterns: seq[string]): bool =
-  for pattern in patterns:
-    if matchPattern(value, pattern):
-      return true
-  return false
+  globMatchAny(patterns, value)
 
 proc shouldProcessProject(projectName: string): bool =
   if includeProjects.len > 0 and not matchesAny(projectName, includeProjects):
