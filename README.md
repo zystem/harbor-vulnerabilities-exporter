@@ -69,7 +69,8 @@ Optional:
 | `INCLUDE_REPOSITORIES` | empty | Comma-separated repository patterns to include |
 | `EXCLUDE_REPOSITORIES` | empty | Comma-separated repository patterns to exclude |
 
-Patterns support `*`, for example `prod-*`, `*/frontend`, or `*sandbox*`.
+Patterns use POSIX glob syntax through `posixglob`. Common examples include
+`prod-*`, `*/frontend`, `*sandbox*`, `repo-?`, and `project-[ab]`.
 Repository names use Harbor's full repository name, for example
 `project-a/app`.
 
@@ -103,14 +104,15 @@ docker run --rm \
   ghcr.io/zystem/harbor-vulnerabilities-exporter:latest
 ```
 
-Use a versioned image tag such as `1.1.0` for production deployments.
+Use a versioned image tag such as `1.1.1` for production deployments.
 
 ## Build From Source
 
 ```sh
 nimble install -y \
   https://github.com/zystem/nim-yyjson \
-  https://github.com/zystem/nim-promlite
+  https://github.com/zystem/nim-promlite \
+  https://github.com/zystem/nim-posixglob
 
 sh build.sh
 
@@ -125,7 +127,7 @@ The Helm chart is published to GHCR as an OCI artifact on version tags.
 ```sh
 helm upgrade --install harbor-vulnerabilities-exporter \
   oci://ghcr.io/zystem/charts/harbor-vulnerabilities-exporter \
-  --version 1.1.0 \
+  --version 1.1.1 \
   --namespace monitoring \
   --create-namespace \
   --set env.HARBOR_API_URL=https://harbor.example/api/v2.0 \
@@ -147,7 +149,7 @@ kubectl create secret generic harbor-vulnerabilities-exporter \
 
 helm upgrade --install harbor-vulnerabilities-exporter \
   oci://ghcr.io/zystem/charts/harbor-vulnerabilities-exporter \
-  --version 1.1.0 \
+  --version 1.1.1 \
   --namespace monitoring \
   --set existingSecret.name=harbor-vulnerabilities-exporter
 ```
@@ -158,7 +160,7 @@ If your Prometheus Operator selects `PodMonitor` objects by label, set
 ```sh
 helm upgrade --install harbor-vulnerabilities-exporter \
   oci://ghcr.io/zystem/charts/harbor-vulnerabilities-exporter \
-  --version 1.1.0 \
+  --version 1.1.1 \
   --namespace monitoring \
   --set existingSecret.name=harbor-vulnerabilities-exporter \
   --set podMonitor.labels.release=prometheus
@@ -175,10 +177,10 @@ On pushes to `main`, the workflow publishes a container image to:
 ghcr.io/zystem/harbor-vulnerabilities-exporter:main
 ```
 
-On tags like `v1.1.0`, it also publishes:
+On tags like `v1.1.1`, it also publishes:
 
-- `ghcr.io/zystem/harbor-vulnerabilities-exporter:v1.1.0`
-- `ghcr.io/zystem/harbor-vulnerabilities-exporter:1.1.0`
+- `ghcr.io/zystem/harbor-vulnerabilities-exporter:v1.1.1`
+- `ghcr.io/zystem/harbor-vulnerabilities-exporter:1.1.1`
 - `ghcr.io/zystem/harbor-vulnerabilities-exporter:latest`
 - `ghcr.io/zystem/harbor-vulnerabilities-exporter:sha-...`
 - `oci://ghcr.io/zystem/charts/harbor-vulnerabilities-exporter`
@@ -187,7 +189,7 @@ On tags like `v1.1.0`, it also publishes:
 Release checklist:
 
 ```sh
-VERSION=1.1.0
+VERSION=1.1.1
 
 # Update Chart.yaml version and appVersion to $VERSION before tagging.
 git tag "v${VERSION}"

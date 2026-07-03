@@ -8,6 +8,9 @@ fi
 if [ -d ../nim-yyjson/src ]; then
   nim_paths="$nim_paths --path:../nim-yyjson/src"
 fi
+if [ -d ../nim-posixglob/src ]; then
+  nim_paths="$nim_paths --path:../nim-posixglob/src"
+fi
 
 nim c -r -d:ssl --threads:on --mm:orc $nim_paths \
   --nimcache:build/nimcache \

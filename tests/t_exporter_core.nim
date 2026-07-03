@@ -13,10 +13,22 @@ suite "pattern matching":
     check matchPattern("project-a", "*-a")
     check matchPattern("project-a", "*ject*")
     check matchPattern("project-a", "pro*a")
+    check matchPattern("project-a", "project-?")
+    check matchPattern("project-a", "project-[abc]")
+    check not matchPattern("project-aa", "project-?")
 
   test "matches any pattern":
     check matchesAny("repo/library/app", @["test/*", "repo/*"])
     check not matchesAny("repo/library/app", @["test/*", "other/*"])
+
+  test "uses posixglob syntax for Harbor filters":
+    check matchPattern("project-a", "project-[ab]")
+    check not matchPattern("project-c", "project-[ab]")
+    check matchPattern("project-c", "project-[!ab]")
+    check matchPattern("repo/library/app", "repo/*/app")
+    check matchPattern("repo/library/app", "repo*app")
+    check matchPattern("repo-*", r"repo-\*")
+    check not matchPattern("repo-abc", r"repo-\*")
 
 suite "url normalization":
   test "keeps absolute vulnerability hrefs intact":

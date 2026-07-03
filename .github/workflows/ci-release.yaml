@@ -47,7 +47,8 @@ jobs:
         run: |
           nimble install -y \
             https://github.com/zystem/nim-yyjson \
-            https://github.com/zystem/nim-promlite
+            https://github.com/zystem/nim-promlite \
+            https://github.com/zystem/nim-posixglob
 
       - name: Run tests
         run: sh tests/run.sh

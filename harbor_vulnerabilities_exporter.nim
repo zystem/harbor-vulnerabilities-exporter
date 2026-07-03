@@ -1,4 +1,5 @@
 import std/[httpclient, os, strutils, sequtils, uri, base64, times]
+import posixglob
 import promlite
 import yyjson
 
@@ -64,24 +65,7 @@ proc logMem(stage: string) =
     logInfo(stage & " RSS=" & $rss & " KiB")
 
 proc matchPattern*(value, pattern: string): bool =
-  if pattern == "*":
-    return true
-
-  if not pattern.contains('*'):
-    return value == pattern
-
-  if pattern.startsWith('*') and pattern.endsWith('*'):
-    let p = pattern[1 .. ^2]
-    return value.contains(p)
-
-  if pattern.startsWith('*'):
-    return value.endsWith(pattern[1 .. ^1])
-
-  if pattern.endsWith('*'):
-    return value.startsWith(pattern[0 .. ^2])
-
-  let parts = pattern.split('*')
-  return value.startsWith(parts[0]) and value.endsWith(parts[^1])
+  globMatch(pattern, value)
 
 proc matchesAny*(value: string, patterns: seq[string]): bool =
   for pattern in patterns:

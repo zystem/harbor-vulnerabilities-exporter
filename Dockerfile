@@ -10,7 +10,8 @@ RUN apk add --no-cache \
 
 RUN nimble install -y \
     https://github.com/zystem/nim-yyjson \
-    https://github.com/zystem/nim-promlite
+    https://github.com/zystem/nim-promlite \
+    https://github.com/zystem/nim-posixglob
 
 COPY harbor_vulnerabilities_exporter.nim .
 
