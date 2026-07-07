@@ -1,22 +1,11 @@
 #!/bin/sh
 set -eu
 
-nim_paths=""
-if [ -d ../nim-promlite/src ]; then
-  nim_paths="$nim_paths --path:../nim-promlite/src"
-fi
-if [ -d ../nim-yyjson/src ]; then
-  nim_paths="$nim_paths --path:../nim-yyjson/src"
-fi
-if [ -d ../nim-posixglob/src ]; then
-  nim_paths="$nim_paths --path:../nim-posixglob/src"
-fi
-
-nim c -r -d:ssl --threads:on --mm:orc $nim_paths \
+nim c -r -d:ssl --threads:on --mm:orc \
   --nimcache:build/nimcache \
   tests/t_exporter_core.nim
 
-nim c -r --threads:on --mm:orc $nim_paths \
+nim c -r --threads:on --mm:orc \
   --nimcache:build/nimcache \
   --out:build/generate-synthetic-harbor-cache \
   tools/generate_synthetic_harbor_cache.nim \
@@ -28,7 +17,7 @@ nim c -r --threads:on --mm:orc $nim_paths \
   --seed:1 \
   --clean
 
-nim c --threads:on --mm:orc $nim_paths \
+nim c --threads:on --mm:orc \
   --nimcache:build/nimcache \
   --out:build/serve-static-darkhttpd \
   tools/serve_static_darkhttpd.nim
@@ -47,6 +36,6 @@ done
 
 HARBOR_API_URL=http://127.0.0.1:18080/api/v2.0 \
 HARBOR_STATIC_JSON_RESPONSES=1 \
-nim c -r -d:ssl --threads:on --mm:orc $nim_paths \
+nim c -r -d:ssl --threads:on --mm:orc \
   --nimcache:build/nimcache \
   tests/t_exporter_synthetic_harbor.nim

@@ -111,11 +111,11 @@ Use a versioned image tag such as `1.1.1` for production deployments.
 
 ```sh
 nimble install -y \
-  https://github.com/zystem/nim-yyjson \
-  https://github.com/zystem/nim-promlite \
-  https://github.com/zystem/nim-posixglob
+  yyjson@1.0.0 \
+  promlite@0.2.0 \
+  posixglob@0.1.6
 
-sh build.sh
+./build.sh
 
 HARBOR_API_URL=https://harbor.example/api/v2.0 \
 ./build/harbor-vulnerabilities-exporter
