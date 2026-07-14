@@ -1,0 +1,84 @@
+steps:
+  build:
+    image: nimlang/nim:2.2.4-alpine
+    commands:
+      - apk add --no-cache gcc musl-dev openssl-dev git curl
+      - git config --global --add safe.directory "$CI_WORKSPACE"
+      - nimble install --depsOnly -y
+      - nimble test
+      - nimble buildExporter
+    when:
+      - event: push
+      - event: pull_request
+      - event: tag
+
+  package_release:
+    image: alpine:3.22
+    commands:
+      - mkdir -p dist
+      - cp build/harbor-vulnerabilities-exporter dist/harbor-vulnerabilities-exporter-linux-amd64
+      - sha256sum dist/harbor-vulnerabilities-exporter-linux-amd64 > dist/harbor-vulnerabilities-exporter-linux-amd64.sha256
+    depends_on:
+      - build
+    when:
+      - event: tag
+        ref: refs/tags/v*
+
+  helm:
+    image: alpine/helm:3.15.4
+    commands:
+      - helm lint helm/harbor-vulnerabilities-exporter
+      - >
+        helm template harbor-vulnerabilities-exporter helm/harbor-vulnerabilities-exporter
+        --namespace monitoring
+        --set env.HARBOR_API_URL=https://harbor.example/api/v2.0
+      - helm package helm/harbor-vulnerabilities-exporter --destination build/helm
+    when:
+      - event: push
+      - event: pull_request
+      - event: tag
+
+  publish_helm:
+    image: alpine/helm:3.15.4
+    commands:
+      - echo "$CI_NETRC_PASSWORD" | helm registry login ghcr.io --username "$CI_NETRC_USERNAME" --password-stdin
+      - helm push build/helm/*.tgz "oci://ghcr.io/$CI_REPO_OWNER/charts"
+    depends_on:
+      - helm
+    when:
+      - event: tag
+        ref: refs/tags/v*
+
+  publish_image:
+    image: woodpeckerci/plugin-docker-buildx:5.2.0
+    settings:
+      registry: ghcr.io
+      repo: ghcr.io/${CI_REPO}
+      username: ${CI_NETRC_USERNAME}
+      password: ${CI_NETRC_PASSWORD}
+      platforms:
+        - linux/amd64
+        - linux/arm64
+      build_args:
+        - VERSION=${CI_COMMIT_TAG##v}
+      tags:
+        - ${CI_COMMIT_TAG##v}
+        - ${CI_COMMIT_TAG}
+        - latest
+    depends_on:
+      - build
+    when:
+      - event: tag
+        ref: refs/tags/v*
+
+  publish_release:
+    image: ghcr.io/cli/cli:2.74.2
+    commands:
+      - GH_TOKEN="$CI_NETRC_PASSWORD" gh release create "$CI_COMMIT_TAG" dist/* --generate-notes --repo "$CI_REPO" --title "$CI_COMMIT_TAG" || GH_TOKEN="$CI_NETRC_PASSWORD" gh release upload "$CI_COMMIT_TAG" dist/* --clobber --repo "$CI_REPO"
+    depends_on:
+      - package_release
+      - publish_helm
+      - publish_image
+    when:
+      - event: tag
+        ref: refs/tags/v*
