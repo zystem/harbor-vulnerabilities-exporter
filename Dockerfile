@@ -8,20 +8,11 @@ RUN apk add --no-cache \
     openssl-dev \
     git
 
-RUN nimble install -y \
-    yyjson@1.0.0 \
-    promlite@0.2.0 \
-    posixglob@0.1.6
+COPY harbor_vulnerabilities_exporter.nimble .
+RUN nimble install -y --depsOnly
 
-COPY harbor_vulnerabilities_exporter.nim .
-
-RUN nim c \
-    -d:release \
-    -d:ssl \
-    --threads:on \
-    --mm:orc \
-    --out:/out/harbor-vulnerabilities-exporter \
-    harbor_vulnerabilities_exporter.nim
+COPY src src
+RUN nimble buildExporter && cp build/harbor-vulnerabilities-exporter /out/harbor-vulnerabilities-exporter
 
 FROM alpine:3.20
 

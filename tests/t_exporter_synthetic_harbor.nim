@@ -2,7 +2,7 @@ import std/[strutils, unittest]
 
 import promlite
 
-import ../harbor_vulnerabilities_exporter
+import ../src/harbor_vulnerabilities_exporter
 
 proc countOccurrences(text, needle: string): int =
   var start = 0

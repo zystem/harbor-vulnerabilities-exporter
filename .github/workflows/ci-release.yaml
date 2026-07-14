@@ -44,17 +44,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libssl-dev curl
 
       - name: Install Nim dependencies
-        run: |
-          nimble install -y \
-            yyjson@1.0.0 \
-            promlite@0.2.0 \
-            posixglob@0.1.6
+        run: nimble install -y --depsOnly
 
       - name: Run tests
-        run: ./tests/run.sh
+        run: nimble test
 
       - name: Build binary
-        run: ./build.sh
+        run: nimble buildExporter
 
       - name: Prepare binary artifact
         run: |

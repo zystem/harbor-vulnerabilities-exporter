@@ -3,7 +3,7 @@ import std/[strutils, unittest]
 import promlite
 import yyjson
 
-import ../harbor_vulnerabilities_exporter
+import ../src/harbor_vulnerabilities_exporter
 
 suite "pattern matching":
   test "matches exact and wildcard patterns":

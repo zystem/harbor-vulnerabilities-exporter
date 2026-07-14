@@ -1,7 +1,9 @@
 build/
+graphify-out/
 harbor-json-cache/
 nimcache/
 *.log
+tests/tester
 tests/t_exporter_core
 tests/t_exporter_synthetic_harbor
 tools/generate_synthetic_harbor_cache
