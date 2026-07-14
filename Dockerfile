@@ -14,7 +14,7 @@ RUN nimble install -y --depsOnly
 COPY src src
 RUN nimble buildExporter && cp build/harbor-vulnerabilities-exporter /out/harbor-vulnerabilities-exporter
 
-FROM alpine:3.20
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates curl
 
