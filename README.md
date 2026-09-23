@@ -171,28 +171,22 @@ helm upgrade --install harbor-vulnerabilities-exporter \
 
 ## CI and Releases
 
-`.github/workflows/ci-release.yaml` runs tests, builds the Linux amd64 binary,
-checks the Helm chart, publishes the Helm chart, and builds the Docker image.
+`.woodpecker.yaml` runs tests, builds the Linux amd64 binary,
+checks the Helm chart, and builds release artifacts. Publishing runs only for
+`v*` tags.
 
-On pushes to `main`, the workflow publishes a container image to:
+On tags like `v1.1.2`, it publishes:
 
-```text
-ghcr.io/zystem/harbor-vulnerabilities-exporter:main
-```
-
-On tags like `v1.1.1`, it also publishes:
-
-- `ghcr.io/zystem/harbor-vulnerabilities-exporter:v1.1.1`
-- `ghcr.io/zystem/harbor-vulnerabilities-exporter:1.1.1`
+- `ghcr.io/zystem/harbor-vulnerabilities-exporter:v1.1.2`
+- `ghcr.io/zystem/harbor-vulnerabilities-exporter:1.1.2`
 - `ghcr.io/zystem/harbor-vulnerabilities-exporter:latest`
-- `ghcr.io/zystem/harbor-vulnerabilities-exporter:sha-...`
 - `oci://ghcr.io/zystem/charts/harbor-vulnerabilities-exporter`
 - a Linux amd64 binary attached to the GitHub Release
 
 Release checklist:
 
 ```sh
-VERSION=1.1.1
+VERSION=1.1.2
 
 # Update Chart.yaml version and appVersion to $VERSION before tagging.
 git tag "v${VERSION}"

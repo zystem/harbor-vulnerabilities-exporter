@@ -1,5 +1,5 @@
 # Package
-version       = "1.1.1"
+version       = "1.1.2"
 author        = "Andrii Zagriadskyi"
 description   = "Prometheus exporter for Harbor vulnerability reports"
 license       = "MIT"
