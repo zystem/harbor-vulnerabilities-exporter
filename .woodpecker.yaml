@@ -17,6 +17,7 @@ steps:
     commands:
       - mkdir -p dist
       - cp build/harbor-vulnerabilities-exporter dist/harbor-vulnerabilities-exporter-linux-amd64
+      - cp LICENSE THIRD_PARTY_NOTICES dist/
       - sha256sum dist/harbor-vulnerabilities-exporter-linux-amd64 > dist/harbor-vulnerabilities-exporter-linux-amd64.sha256
     depends_on:
       - build
@@ -27,6 +28,7 @@ steps:
   helm:
     image: alpine/helm:3.15.4
     commands:
+      - cp LICENSE helm/harbor-vulnerabilities-exporter/LICENSE
       - helm lint helm/harbor-vulnerabilities-exporter
       - >
         helm template harbor-vulnerabilities-exporter helm/harbor-vulnerabilities-exporter
@@ -92,3 +94,16 @@ steps:
     when:
       - event: tag
         ref: refs/tags/v*
+
+  renovate:
+    image: renovate/renovate:latest
+    commands:
+      - renovate "$CI_REPO"
+    environment:
+      RENOVATE_PLATFORM: github
+      RENOVATE_TOKEN:
+        from_secret: renovate_token
+    when:
+      - event: cron
+        cron: renovate
+      - event: manual

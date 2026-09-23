@@ -12,7 +12,9 @@ COPY harbor_vulnerabilities_exporter.nimble .
 RUN nimble install -y --depsOnly
 
 COPY src src
-RUN nimble buildExporter && cp build/harbor-vulnerabilities-exporter /out/harbor-vulnerabilities-exporter
+RUN mkdir -p /out \
+    && nimble buildExporter \
+    && cp build/harbor-vulnerabilities-exporter /out/harbor-vulnerabilities-exporter
 
 FROM alpine:3.20
 
@@ -21,6 +23,7 @@ RUN apk add --no-cache ca-certificates curl
 RUN mkdir -p /data && chown 65534:65534 /data
 
 COPY --from=builder /out/harbor-vulnerabilities-exporter /usr/local/bin/harbor-vulnerabilities-exporter
+COPY LICENSE THIRD_PARTY_NOTICES /usr/share/licenses/harbor-vulnerabilities-exporter/
 
 USER 65534:65534
 
